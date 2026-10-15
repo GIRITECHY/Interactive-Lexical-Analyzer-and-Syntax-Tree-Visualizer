@@ -1,0 +1,467 @@
+/**
+ * ast-visualizer.js - Custom Native SVG Syntax Tree Visualizer for LexiTree
+ * 
+ * Renders Abstract Syntax Trees using native SVG elements without any
+ * third-party visualization libraries.
+ * Features:
+ * - Hierarchical top-to-bottom layout with guaranteed non-overlapping nodes.
+ * - Multi-statement program support.
+ * - Distinct color-coding and iconography per AST node type.
+ * - Interactive node inspection (hover/click).
+ * - Zoom in / Zoom out / Pan / Reset controls.
+ */
+
+const AstVisualizer = (() => {
+    // Layout Constants
+    const NODE_WIDTH = 136;
+    const NODE_HEIGHT = 52;
+    const H_GAP = 28;
+    const V_GAP = 64;
+    const PADDING_X = 40;
+    const PADDING_Y = 40;
+
+    // Node Type Color Palette (Light theme tailored HSL/Hex)
+    const COLOR_SCHEMES = {
+        Program:    { fill: "#e0e7ff", stroke: "#6366f1", textType: "#4338ca", textVal: "#1e1b4b" },
+        Assignment: { fill: "#eff6ff", stroke: "#3b82f6", textType: "#1d4ed8", textVal: "#1e3a8a" },
+        BinaryOp:   { fill: "#f0fdf4", stroke: "#10b981", textType: "#047857", textVal: "#064e3b" },
+        UnaryOp:    { fill: "#fffbeb", stroke: "#f59e0b", textType: "#b45309", textVal: "#78350f" },
+        Identifier: { fill: "#faf5ff", stroke: "#8b5cf6", textType: "#6d28d9", textVal: "#4c1d95" },
+        Number:     { fill: "#fff1f2", stroke: "#f43f5e", textType: "#be123c", textVal: "#881337" }
+    };
+
+    let svgElement, emptyStateElement, containerElement, inspectorInfo;
+    let currentScale = 1.0;
+    let translateX = 0;
+    let translateY = 0;
+    let isPanning = false;
+    let startPanX = 0;
+    let startPanY = 0;
+    let currentTreeRoot = null;
+
+    function init() {
+        svgElement = document.getElementById("astSvg");
+        emptyStateElement = document.getElementById("astEmptyState");
+        containerElement = document.getElementById("svgContainer");
+        inspectorInfo = document.getElementById("inspectorInfo");
+
+        // Pan and Zoom controls
+        document.getElementById("zoomInBtn").addEventListener("click", () => zoom(0.15));
+        document.getElementById("zoomOutBtn").addEventListener("click", () => zoom(-0.15));
+        document.getElementById("resetZoomBtn").addEventListener("click", resetView);
+
+        // Container mouse drag panning
+        containerElement.addEventListener("mousedown", handleMouseDown);
+        window.addEventListener("mousemove", handleMouseMove);
+        window.addEventListener("mouseup", handleMouseUp);
+        containerElement.addEventListener("wheel", handleWheel, { passive: false });
+    }
+
+    function clear() {
+        svgElement.innerHTML = "";
+        svgElement.classList.add("hidden");
+        emptyStateElement.classList.remove("hidden");
+        currentTreeRoot = null;
+        inspectorInfo.innerText = "Hover or click on any AST node to inspect its properties.";
+    }
+
+    /**
+     * Converts JSON AST into visual tree structure.
+     */
+    function buildVisualTree(node) {
+        if (!node) return null;
+
+        let type = node.type;
+        let title = type;
+        let val = "";
+        let children = [];
+        let details = "";
+
+        switch (type) {
+            case "Program":
+                title = "Program";
+                val = `${node.statements.length} stmt${node.statements.length === 1 ? '' : 's'}`;
+                children = (node.statements || []).map(buildVisualTree);
+                details = `Program root containing ${node.statements.length} statement(s).`;
+                break;
+
+            case "Assignment":
+                title = "Assignment";
+                val = "=";
+                children = [
+                    buildVisualTree(node.identifier),
+                    buildVisualTree(node.value)
+                ];
+                details = `Assignment: Variable '${node.identifier.name}' assigned at line ${node.line}, col ${node.column}.`;
+                break;
+
+            case "BinaryOp":
+                title = "BinaryOp";
+                val = node.operator;
+                children = [
+                    buildVisualTree(node.left),
+                    buildVisualTree(node.right)
+                ];
+                details = `Binary Operation '${node.operator}' at line ${node.line}, col ${node.column}.`;
+                break;
+
+            case "UnaryOp":
+                title = "UnaryOp";
+                val = node.operator;
+                children = [
+                    buildVisualTree(node.operand)
+                ];
+                details = `Unary Operator '${node.operator}' at line ${node.line}, col ${node.column}.`;
+                break;
+
+            case "Number":
+                title = "Number";
+                val = String(node.raw !== undefined ? node.raw : node.value);
+                children = [];
+                details = `Literal Constant ${val} (numeric value: ${node.value}) at line ${node.line}, col ${node.column}.`;
+                break;
+
+            case "Identifier":
+                title = "Identifier";
+                val = node.name;
+                children = [];
+                details = `Variable Identifier '${node.name}' at line ${node.line}, col ${node.column}.`;
+                break;
+
+            default:
+                val = "?";
+                details = `Unknown node ${type}`;
+        }
+
+        return {
+            type,
+            title,
+            val,
+            details,
+            rawNode: node,
+            children: children.filter(Boolean),
+            x: 0,
+            y: 0,
+            subtreeWidth: 0
+        };
+    }
+
+    /**
+     * Bottom-up layout pass: compute required subtree widths.
+     */
+    function computeSubtreeWidth(node) {
+        if (!node.children || node.children.length === 0) {
+            node.subtreeWidth = NODE_WIDTH;
+            return node.subtreeWidth;
+        }
+
+        let sumChildren = 0;
+        node.children.forEach((child, idx) => {
+            sumChildren += computeSubtreeWidth(child);
+            if (idx > 0) sumChildren += H_GAP;
+        });
+
+        node.subtreeWidth = Math.max(NODE_WIDTH, sumChildren);
+        return node.subtreeWidth;
+    }
+
+    /**
+     * Top-down layout pass: assign (x, y) coordinates.
+     */
+    function assignPositions(node, leftBound, depth) {
+        node.y = PADDING_Y + depth * (NODE_HEIGHT + V_GAP);
+
+        if (!node.children || node.children.length === 0) {
+            node.x = leftBound + (node.subtreeWidth - NODE_WIDTH) / 2;
+            return;
+        }
+
+        let sumChildrenWidth = 0;
+        node.children.forEach((child, idx) => {
+            sumChildrenWidth += child.subtreeWidth;
+            if (idx > 0) sumChildrenWidth += H_GAP;
+        });
+
+        let currentLeft = leftBound + Math.max(0, (node.subtreeWidth - sumChildrenWidth) / 2);
+        node.children.forEach((child) => {
+            assignPositions(child, currentLeft, depth + 1);
+            currentLeft += child.subtreeWidth + H_GAP;
+        });
+
+        // Center parent over the midpoint of its first and last child
+        const firstChild = node.children[0];
+        const lastChild = node.children[node.children.length - 1];
+        node.x = (firstChild.x + lastChild.x) / 2;
+    }
+
+    /**
+     * Collect all nodes and connecting links for rendering.
+     */
+    function collectGraph(node, nodesOut, linksOut) {
+        nodesOut.push(node);
+        node.children.forEach(child => {
+            linksOut.push({
+                x1: node.x + NODE_WIDTH / 2,
+                y1: node.y + NODE_HEIGHT,
+                x2: child.x + NODE_WIDTH / 2,
+                y2: child.y
+            });
+            collectGraph(child, nodesOut, linksOut);
+        });
+    }
+
+    /**
+     * Main entry: Render AST into SVG.
+     */
+    function render(ast) {
+        if (!ast) {
+            clear();
+            return;
+        }
+
+        // Determine effective root:
+        // If Program has exactly 1 statement, render that statement as the tree root for clarity,
+        // or render Program if multiple statements exist.
+        let rootNodeToRender = ast;
+        if (ast.type === "Program" && ast.statements && ast.statements.length === 1) {
+            rootNodeToRender = ast.statements[0];
+        }
+
+        const visualRoot = buildVisualTree(rootNodeToRender);
+        if (!visualRoot) {
+            clear();
+            return;
+        }
+
+        currentTreeRoot = visualRoot;
+        computeSubtreeWidth(visualRoot);
+        assignPositions(visualRoot, PADDING_X, 0);
+
+        const nodes = [];
+        const links = [];
+        collectGraph(visualRoot, nodes, links);
+
+        // Calculate bounding box
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        nodes.forEach(n => {
+            minX = Math.min(minX, n.x);
+            maxX = Math.max(maxX, n.x + NODE_WIDTH);
+            minY = Math.min(minY, n.y);
+            maxY = Math.max(maxY, n.y + NODE_HEIGHT);
+        });
+
+        const totalWidth = Math.max(600, maxX + PADDING_X);
+        const totalHeight = Math.max(450, maxY + PADDING_Y);
+
+        // Hide empty state, reveal SVG
+        emptyStateElement.classList.add("hidden");
+        svgElement.classList.remove("hidden");
+        svgElement.innerHTML = "";
+
+        svgElement.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
+        svgElement.setAttribute("width", totalWidth);
+        svgElement.setAttribute("height", totalHeight);
+
+        // Add SVG Gradients & Drop Shadows
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        defs.innerHTML = `
+            <filter id="nodeCardShadow" x="-15%" y="-15%" width="130%" height="135%">
+                <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1e1b4b" flood-opacity="0.10" />
+            </filter>
+            <linearGradient id="grad-Program" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#4f46e5" />
+                <stop offset="100%" stop-color="#6366f1" />
+            </linearGradient>
+            <linearGradient id="grad-Assignment" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#2563eb" />
+                <stop offset="100%" stop-color="#3b82f6" />
+            </linearGradient>
+            <linearGradient id="grad-BinaryOp" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#059669" />
+                <stop offset="100%" stop-color="#10b981" />
+            </linearGradient>
+            <linearGradient id="grad-UnaryOp" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#d97706" />
+                <stop offset="100%" stop-color="#f59e0b" />
+            </linearGradient>
+            <linearGradient id="grad-Identifier" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#7c3aed" />
+                <stop offset="100%" stop-color="#a855f7" />
+            </linearGradient>
+            <linearGradient id="grad-Number" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#e11d48" />
+                <stop offset="100%" stop-color="#fb7185" />
+            </linearGradient>
+        `;
+        svgElement.appendChild(defs);
+
+        // Master transformation group for zoom/pan
+        const gMaster = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        gMaster.id = "astTransformGroup";
+        svgElement.appendChild(gMaster);
+
+        // 1. Render connecting links with gradient stroke & junction dots
+        links.forEach(link => {
+            const gLink = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            gLink.setAttribute("class", "ast-link-group");
+
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const dy = (link.y2 - link.y1) * 0.55;
+            const d = `M ${link.x1} ${link.y1} C ${link.x1} ${link.y1 + dy}, ${link.x2} ${link.y2 - dy}, ${link.x2} ${link.y2}`;
+            path.setAttribute("d", d);
+            path.setAttribute("class", "ast-link");
+            path.setAttribute("stroke", "#818cf8");
+            path.setAttribute("stroke-width", "2.2");
+            path.setAttribute("fill", "none");
+            gLink.appendChild(path);
+
+            // Starting junction dot
+            const dot1 = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            dot1.setAttribute("cx", link.x1);
+            dot1.setAttribute("cy", link.y1);
+            dot1.setAttribute("r", "3.5");
+            dot1.setAttribute("fill", "#6366f1");
+            gLink.appendChild(dot1);
+
+            // Ending junction dot
+            const dot2 = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            dot2.setAttribute("cx", link.x2);
+            dot2.setAttribute("cy", link.y2);
+            dot2.setAttribute("r", "3.5");
+            dot2.setAttribute("fill", "#6366f1");
+            gLink.appendChild(dot2);
+
+            gMaster.appendChild(gLink);
+        });
+
+        // 2. Render tree nodes with two-tone header card design
+        nodes.forEach(node => {
+            const gNode = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            gNode.setAttribute("class", "ast-node");
+            gNode.setAttribute("transform", `translate(${node.x}, ${node.y})`);
+
+            const colors = COLOR_SCHEMES[node.type] || COLOR_SCHEMES.Assignment;
+
+            // Card Base Rectangle with drop shadow
+            const cardBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            cardBg.setAttribute("width", NODE_WIDTH);
+            cardBg.setAttribute("height", NODE_HEIGHT);
+            cardBg.setAttribute("fill", "#ffffff");
+            cardBg.setAttribute("stroke", colors.stroke);
+            cardBg.setAttribute("stroke-width", "1.8");
+            cardBg.setAttribute("rx", "10");
+            cardBg.setAttribute("ry", "10");
+            cardBg.setAttribute("filter", "url(#nodeCardShadow)");
+            gNode.appendChild(cardBg);
+
+            // Top Header Banner with gradient fill
+            const headerBanner = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const w = NODE_WIDTH;
+            const r = 10;
+            const hHeader = 22;
+            const bannerPath = `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${hHeader} L 0 ${hHeader} Z`;
+            headerBanner.setAttribute("d", bannerPath);
+            headerBanner.setAttribute("fill", `url(#grad-${node.type})`);
+            gNode.appendChild(headerBanner);
+
+            // Node Type Text (crisp white in top header banner)
+            const textType = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            textType.setAttribute("x", NODE_WIDTH / 2);
+            textType.setAttribute("y", 15);
+            textType.setAttribute("text-anchor", "middle");
+            textType.setAttribute("fill", "#ffffff");
+            textType.setAttribute("class", "node-text-type");
+            textType.setAttribute("font-size", "10.5");
+            textType.setAttribute("font-weight", "700");
+            textType.setAttribute("letter-spacing", "0.06em");
+            textType.textContent = node.title.toUpperCase();
+            gNode.appendChild(textType);
+
+            // Node Value Text (centered in bottom body)
+            const textVal = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            textVal.setAttribute("x", NODE_WIDTH / 2);
+            textVal.setAttribute("y", 41);
+            textVal.setAttribute("text-anchor", "middle");
+            textVal.setAttribute("fill", "#0f172a");
+            textVal.setAttribute("class", "node-text-val");
+            textVal.setAttribute("font-size", "13.5");
+            textVal.setAttribute("font-weight", "600");
+            textVal.setAttribute("font-family", "'Fira Code', Consolas, monospace");
+            const displayVal = node.val.length > 13 ? node.val.substring(0, 11) + "..." : node.val;
+            textVal.textContent = displayVal;
+            gNode.appendChild(textVal);
+
+            // Hover and Click events for node inspection
+            gNode.addEventListener("mouseenter", () => {
+                inspectorInfo.innerHTML = `<strong>${node.title}:</strong> ${node.details}`;
+            });
+            gNode.addEventListener("click", (e) => {
+                e.stopPropagation();
+                inspectorInfo.innerHTML = `<strong>${node.title}:</strong> ${node.details}`;
+            });
+
+            gMaster.appendChild(gNode);
+        });
+
+        resetView();
+    }
+
+    // -------------------------------------------------------------------------
+    // Pan & Zoom Controls
+    // -------------------------------------------------------------------------
+
+    function updateTransform() {
+        const gMaster = document.getElementById("astTransformGroup");
+        if (gMaster) {
+            gMaster.setAttribute(
+                "transform",
+                `translate(${translateX}, ${translateY}) scale(${currentScale})`
+            );
+        }
+    }
+
+    function zoom(delta) {
+        const newScale = Math.min(2.5, Math.max(0.4, currentScale + delta));
+        currentScale = parseFloat(newScale.toFixed(2));
+        updateTransform();
+    }
+
+    function resetView() {
+        currentScale = 1.0;
+        translateX = 0;
+        translateY = 0;
+        updateTransform();
+    }
+
+    function handleMouseDown(e) {
+        if (e.button !== 0) return; // Only left-click
+        isPanning = true;
+        startPanX = e.clientX - translateX;
+        startPanY = e.clientY - translateY;
+    }
+
+    function handleMouseMove(e) {
+        if (!isPanning) return;
+        translateX = e.clientX - startPanX;
+        translateY = e.clientY - startPanY;
+        updateTransform();
+    }
+
+    function handleMouseUp() {
+        isPanning = false;
+    }
+
+    function handleWheel(e) {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = e.deltaY < 0 ? 0.1 : -0.1;
+            zoom(delta);
+        }
+    }
+
+    return {
+        init,
+        render,
+        clear
+    };
+})();

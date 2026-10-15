@@ -1,0 +1,23 @@
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and Editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

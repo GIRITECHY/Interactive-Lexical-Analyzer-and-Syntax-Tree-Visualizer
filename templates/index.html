@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LexiTree – Interactive Lexical Analyzer & Syntax Tree Visualizer</title>
+    <meta name="description" content="A modern, educational compiler design tool demonstrating lexical analysis, recursive-descent syntax parsing, and Abstract Syntax Tree (AST) visualization.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Google Fonts for crisp typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="5" r="3"></circle>
+                    <line x1="12" y1="8" x2="12" y2="14"></line>
+                    <path d="M12 14l-4 4"></path>
+                    <path d="M12 14l4 4"></path>
+                    <circle cx="8" cy="19" r="2"></circle>
+                    <circle cx="16" cy="19" r="2"></circle>
+                </svg>
+            </div>
+            <div>
+                <h1 class="brand-title">LexiTree</h1>
+                <p class="brand-subtitle">Interactive Lexical Analyzer &amp; Syntax Tree Visualizer</p>
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <div id="statusBadge" class="status-badge status-idle">
+                <span class="status-dot"></span>
+                <span id="statusText">System Ready</span>
+            </div>
+            <button id="guideBtn" class="btn btn-secondary btn-sm" title="View Language Specification &amp; Viva Guide">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                Viva Guide
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Application Container -->
+    <main class="main-container">
+        <!-- Error / Notification Bar -->
+        <div id="errorPanel" class="error-panel hidden">
+            <div class="error-card">
+                <div class="error-icon-box" id="errorIconBox">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>
+                <div class="error-content">
+                    <div class="error-header">
+                        <span id="errorTypeBadge" class="badge badge-error">Syntax Error</span>
+                        <span id="errorLocation" class="error-location">Line 1, Column 10</span>
+                    </div>
+                    <div id="errorMessage" class="error-message">Error message text here</div>
+                    <div id="errorSuggestion" class="error-suggestion">
+                        <strong>Suggestion:</strong> <span>Suggestion text</span>
+                    </div>
+                </div>
+                <button id="dismissErrorBtn" class="close-btn" title="Dismiss error">&times;</button>
+            </div>
+        </div>
+
+        <!-- 2-Column Responsive Layout -->
+        <div class="workspace-grid">
+            <!-- Left Column: Source Code Editor & Token Table -->
+            <section class="left-panel">
+                <!-- Editor Card -->
+                <div class="card editor-card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <div class="window-dots">
+                                <span class="dot dot-red"></span>
+                                <span class="dot dot-yellow"></span>
+                                <span class="dot dot-green"></span>
+                            </div>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="16 18 22 12 16 6"></polyline>
+                                <polyline points="8 6 2 12 8 18"></polyline>
+                            </svg>
+                            Source Code Editor
+                        </div>
+
+                        <!-- Example Program Dropdown -->
+                        <div class="example-selector-wrapper">
+                            <label for="exampleSelector" class="selector-label">Preset:</label>
+                            <select id="exampleSelector" class="select-dropdown">
+                                <option value="" disabled selected>-- Select Program --</option>
+                                <optgroup label="Valid Programs">
+                                    <option value="ex1">1. Simple Assignment (x = 10;)</option>
+                                    <option value="ex2">2. Operator Precedence (result = 2 + 3 * 4;)</option>
+                                    <option value="ex3">3. Parenthesized Expression (result = (2 + 3) * 4;)</option>
+                                    <option value="ex4">4. Multiple Statements (total = a + b;)</option>
+                                    <option value="ex5">5. Unary Minus (y = -(x + 3);)</option>
+                                </optgroup>
+                                <optgroup label="Grammar Error Demonstrations">
+                                    <option value="err1">6. Missing Operand (x = 10 + ;)</option>
+                                    <option value="err2">7. Missing Semicolon (x = 10)</option>
+                                    <option value="err3">8. Unmatched Parenthesis (x = (10 + 5;)</option>
+                                    <option value="err4">9. Invalid Character (x = 10 @ 2;)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Quick Preset Chips Bar -->
+                    <div class="quick-chips-bar">
+                        <span class="chips-label">Quick Load:</span>
+                        <button type="button" class="preset-chip chip-valid" data-preset="ex2">2 + 3 * 4</button>
+                        <button type="button" class="preset-chip chip-valid" data-preset="ex3">(2 + 3) * 4</button>
+                        <button type="button" class="preset-chip chip-valid" data-preset="ex4">Multi-Statement</button>
+                        <button type="button" class="preset-chip chip-valid" data-preset="ex5">-(x + 3)</button>
+                        <button type="button" class="preset-chip chip-invalid" data-preset="err1">Missing Operand</button>
+                        <button type="button" class="preset-chip chip-invalid" data-preset="err2">Missing ;</button>
+                        <button type="button" class="preset-chip chip-invalid" data-preset="err4">Invalid @</button>
+                    </div>
+
+                    <!-- Editor Body with synchronized line numbers -->
+                    <div class="editor-body">
+                        <div id="lineNumbers" class="line-numbers">1</div>
+                        <textarea id="codeEditor" class="code-textarea" spellcheck="false" placeholder="// Enter LexiTree code here...
+// Example:
+x = 10;
+result = 2 + 3 * 4;"></textarea>
+                    </div>
+
+                    <!-- Editor Controls -->
+                    <div class="editor-footer">
+                        <div class="footer-left">
+                            <span id="charCount" class="counter-text">0 chars</span>
+                            <span id="lineCount" class="counter-text">1 lines</span>
+                        </div>
+                        <div class="footer-right">
+                            <button id="clearBtn" class="btn btn-secondary" title="Clear source code editor">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 6h18"></path>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                Clear
+                            </button>
+                            <button id="analyzeBtn" class="btn btn-primary" title="Execute Lexical &amp; Syntax Analysis">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                Analyze Code
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Token Table Card -->
+                <div class="card token-card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="3" y1="15" x2="21" y2="15"></line>
+                                <line x1="9" y1="3" x2="9" y2="21"></line>
+                                <line x1="15" y1="3" x2="15" y2="21"></line>
+                            </svg>
+                            Lexical Analysis (Token Table)
+                            <span id="tokenCountBadge" class="count-pill">0</span>
+                        </div>
+                        <div class="table-search-box">
+                            <input type="text" id="tokenSearch" placeholder="Filter tokens..." class="search-input">
+                        </div>
+                    </div>
+
+                    <div class="table-scroll-container">
+                        <table id="tokenTable" class="token-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Lexeme</th>
+                                    <th>Token Type</th>
+                                    <th>Line</th>
+                                    <th>Column</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tokenTableBody">
+                                <tr class="empty-row">
+                                    <td colspan="5" class="empty-state">
+                                        <div class="empty-box">
+                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                                            </svg>
+                                            <p>No tokens generated yet</p>
+                                            <small>Click "Analyze Code" to scan source code</small>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Abstract Syntax Tree (AST) Visualization -->
+            <section class="right-panel">
+                <div class="card ast-card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="5" r="3"></circle>
+                                <path d="M12 8v4"></path>
+                                <circle cx="6" cy="18" r="3"></circle>
+                                <path d="M9 16l-3 -2"></path>
+                                <circle cx="18" cy="18" r="3"></circle>
+                                <path d="M15 16l3 -2"></path>
+                            </svg>
+                            Abstract Syntax Tree (AST)
+                        </div>
+
+                        <!-- Tree View Controls -->
+                        <div class="ast-controls">
+                            <button id="zoomInBtn" class="control-btn" title="Zoom In">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    <line x1="11" y1="8" x2="11" y2="14"></line>
+                                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                                </svg>
+                            </button>
+                            <button id="zoomOutBtn" class="control-btn" title="Zoom Out">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                                </svg>
+                            </button>
+                            <button id="resetZoomBtn" class="control-btn" title="Reset View">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                    <path d="M3 3v5h5"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tree Legend -->
+                    <div class="tree-legend">
+                        <span class="legend-item"><span class="legend-chip chip-program"></span> Program</span>
+                        <span class="legend-item"><span class="legend-chip chip-assignment"></span> Assignment</span>
+                        <span class="legend-item"><span class="legend-chip chip-binary"></span> BinaryOp</span>
+                        <span class="legend-item"><span class="legend-chip chip-unary"></span> UnaryOp</span>
+                        <span class="legend-item"><span class="legend-chip chip-identifier"></span> Identifier</span>
+                        <span class="legend-item"><span class="legend-chip chip-number"></span> Number</span>
+                    </div>
+
+                    <!-- SVG Canvas Container -->
+                    <div id="svgContainer" class="svg-container">
+                        <!-- Custom SVG dynamically rendered by ast-visualizer.js -->
+                        <div id="astEmptyState" class="ast-empty-state">
+                            <div class="empty-box">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                                    <path d="M2 17l10 5 10-5"></path>
+                                    <path d="M2 12l10 5 10-5"></path>
+                                </svg>
+                                <h3>No Syntax Tree Generated</h3>
+                                <p>Select an example or write code, then press <strong>Analyze Code</strong> to view the tree structure.</p>
+                            </div>
+                        </div>
+                        <svg id="astSvg" class="ast-svg hidden"></svg>
+                    </div>
+
+                    <!-- Node Inspector Bar -->
+                    <div id="nodeInspector" class="node-inspector">
+                        <span class="inspector-label">Node Inspector:</span>
+                        <span id="inspectorInfo" class="inspector-info">Hover or click on any AST node to inspect its properties.</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Viva & Language Guide Modal -->
+    <div id="guideModal" class="modal-backdrop hidden">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h2>LexiTree – Language Guide &amp; Viva Reference</h2>
+                <button id="closeModalBtn" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <section class="modal-section">
+                    <h3>1. Formal Grammar Specification</h3>
+                    <pre class="code-block">program     -&gt; statement*
+statement   -&gt; IDENTIFIER "=" expression ";"
+expression  -&gt; term (("+" | "-") term)*
+term        -&gt; unary (("*" | "/") unary)*
+unary       -&gt; ("+" | "-") unary | primary
+primary     -&gt; NUMBER | IDENTIFIER | "(" expression ")"</pre>
+                </section>
+
+                <section class="modal-section">
+                    <h3>2. Operator Precedence &amp; Associativity</h3>
+                    <table class="reference-table">
+                        <thead>
+                            <tr>
+                                <th>Precedence</th>
+                                <th>Operator</th>
+                                <th>Description</th>
+                                <th>Associativity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>1 (Highest)</td>
+                                <td><code>( ... )</code></td>
+                                <td>Parentheses</td>
+                                <td>Non-associative</td>
+                            </tr>
+                            <tr>
+                                <td>2</td>
+                                <td><code>+</code>, <code>-</code></td>
+                                <td>Unary Plus &amp; Minus</td>
+                                <td>Right-to-Left (Prefix)</td>
+                            </tr>
+                            <tr>
+                                <td>3</td>
+                                <td><code>*</code>, <code>/</code></td>
+                                <td>Multiplication &amp; Division</td>
+                                <td>Left-to-Right</td>
+                            </tr>
+                            <tr>
+                                <td>4 (Lowest)</td>
+                                <td><code>+</code>, <code>-</code></td>
+                                <td>Addition &amp; Subtraction</td>
+                                <td>Left-to-Right</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="modal-section">
+                    <h3>3. Compiler Design Viva Questions &amp; Answers</h3>
+                    <div class="qa-item">
+                        <p class="qa-q">Q1: What is the difference between a Lexical Analyzer and a Syntax Analyzer?</p>
+                        <p class="qa-a"><strong>Ans:</strong> The <em>Lexical Analyzer (Lexer)</em> converts the stream of input characters into meaningful units called <strong>Tokens</strong>, discarding whitespace and flagging illegal characters. The <em>Syntax Analyzer (Parser)</em> takes this token stream and verifies that it adheres to the formal context-free grammar, constructing an <strong>Abstract Syntax Tree (AST)</strong>.</p>
+                    </div>
+                    <div class="qa-item">
+                        <p class="qa-q">Q2: Why use a Recursive-Descent Parser?</p>
+                        <p class="qa-a"><strong>Ans:</strong> A Recursive-Descent Parser is a top-down parsing technique where each non-terminal in the grammar is implemented as a function. It is intuitive, easy to debug, supports unambiguous operator precedence, and gives precise syntax error diagnostics.</p>
+                    </div>
+                    <div class="qa-item">
+                        <p class="qa-q">Q3: What is the difference between a Parse Tree and an Abstract Syntax Tree (AST)?</p>
+                        <p class="qa-a"><strong>Ans:</strong> A <em>Parse Tree</em> (Concrete Syntax Tree) contains all syntactic details including punctuation and parentheses. An <em>AST</em> retains only the structural, semantic information needed for translation (operators, operands, identifiers) without syntactic noise like semicolons or parentheses.</p>
+                    </div>
+                </section>
+            </div>
+            <div class="modal-footer">
+                <button id="closeModalFooterBtn" class="btn btn-secondary">Close Guide</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts in proper dependency order -->
+    <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ast-visualizer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
