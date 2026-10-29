@@ -843,21 +843,66 @@ body {
 
 /* SVG Node and Link Visuals */
 .ast-link-group {
-    transition: opacity 0.2s;
+    transition: opacity 0.22s ease;
+}
+
+.ast-link-group path {
+    transition: stroke 0.22s ease, stroke-width 0.22s ease, filter 0.22s ease;
+}
+
+.ast-link-group circle {
+    transition: fill 0.22s ease, r 0.22s ease;
+}
+
+.ast-link-group.link-highlighted path {
+    stroke: #4f46e5 !important;
+    stroke-width: 3.4px !important;
+    filter: drop-shadow(0 0 6px rgba(79, 70, 229, 0.55));
+}
+
+.ast-link-group.link-highlighted circle {
+    fill: #4338ca !important;
+    r: 4.5 !important;
+}
+
+.ast-link-group.link-dimmed {
+    opacity: 0.18;
 }
 
 .ast-node {
     cursor: pointer;
-    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.22s ease;
+    user-select: none;
+    pointer-events: auto;
 }
 
-.ast-node:hover {
-    transform: translateY(-2px);
+.ast-node rect.card-bg {
+    transition: stroke 0.2s ease, filter 0.2s ease;
 }
 
-.ast-node:hover rect {
-    filter: drop-shadow(0 8px 16px rgba(79, 70, 229, 0.22));
-    stroke-width: 2.4px;
+/* Rock-solid hover: NO translateY, NO scale, NO stroke-width changes to eliminate jitter / dancing */
+.ast-node:hover rect.card-bg,
+.ast-node.node-highlighted rect.card-bg {
+    filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.50)) !important;
+}
+
+.ast-node.pt-node-terminal:hover rect.card-bg,
+.ast-node.pt-node-terminal.node-highlighted rect.card-bg {
+    filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.55)) !important;
+}
+
+.ast-node.node-selected rect.card-bg {
+    filter: drop-shadow(0 0 14px rgba(79, 70, 229, 0.75)) !important;
+    stroke: #4338ca !important;
+}
+
+.ast-node.pt-node-terminal.node-selected rect.card-bg {
+    filter: drop-shadow(0 0 14px rgba(5, 150, 105, 0.75)) !important;
+    stroke: #047857 !important;
+}
+
+.ast-node.node-dimmed {
+    opacity: 0.22;
 }
 
 /* Node Inspector Bar */
@@ -870,6 +915,8 @@ body {
     display: flex;
     align-items: center;
     gap: 0.65rem;
+    min-height: 48px;
+    flex-wrap: wrap;
 }
 
 .inspector-label {
@@ -880,11 +927,60 @@ body {
     border-radius: 5px;
     font-size: 0.75rem;
     text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
 }
 
 .inspector-info {
     color: var(--text-main);
     font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.inspector-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.badge-pinned {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.badge-ast {
+    background: #e0e7ff;
+    color: #4338ca;
+}
+
+.badge-nonterminal {
+    background: #ede9fe;
+    color: #6d28d9;
+}
+
+.badge-terminal {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.inspector-pos {
+    font-family: 'Fira Code', Consolas, monospace;
+    font-size: 0.76rem;
+    color: #64748b;
+    background: #f1f5f9;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: 0.25rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -1034,4 +1130,126 @@ body {
     border-top: 1px solid var(--border-color);
     display: flex;
     justify-content: flex-end;
+}
+
+
+/* --------------------------------------------------------------------------
+   View Switcher Tabs (AST View vs Parse Tree View)
+   -------------------------------------------------------------------------- */
+.view-tabs {
+    display: flex;
+    align-items: center;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    gap: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.view-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.38rem 0.85rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.18s ease-in-out;
+}
+
+.view-tab:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.view-tab.active {
+    background: #ffffff;
+    color: var(--primary);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+
+.view-tab svg {
+    flex-shrink: 0;
+}
+
+/* Parse Tree Legend Chips */
+.chip-pt-nonterminal {
+    background: #6366f1;
+}
+
+.chip-pt-terminal {
+    background: #10b981;
+}
+
+.chip-pt-rule {
+    background: #8b5cf6;
+}
+
+/* --------------------------------------------------------------------------
+   Intermediate Code (Three-Address Code) Card
+   -------------------------------------------------------------------------- */
+.tac-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tac-body {
+    padding: 1.15rem 1.4rem;
+    background: #fbfcfe;
+    min-height: 140px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.tac-empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 110px;
+    color: var(--text-light);
+    font-size: 0.88rem;
+    text-align: center;
+}
+
+.tac-content {
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.85rem 1.25rem 0.85rem 2.5rem;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.tac-instruction-list {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    line-height: 1.85;
+    color: #1e293b;
+}
+
+.tac-instruction-list li {
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+}
+
+.tac-instruction-list li:hover {
+    background: #eef2ff;
+    color: #312e81;
+}
+
+.tac-instruction-list li::marker {
+    color: #94a3b8;
+    font-weight: 600;
 }

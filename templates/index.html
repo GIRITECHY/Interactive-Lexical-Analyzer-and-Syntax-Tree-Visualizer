@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LexiTree – Interactive Lexical Analyzer & Syntax Tree Visualizer</title>
-    <meta name="description" content="A modern, educational compiler design tool demonstrating lexical analysis, recursive-descent syntax parsing, and Abstract Syntax Tree (AST) visualization.">
+    <title>LexiTree – Interactive Lexical Analyzer, Syntax Visualizer &amp; TAC Generator</title>
+    <meta name="description" content="A modern, educational compiler design tool demonstrating lexical analysis, recursive-descent syntax parsing, Abstract Syntax Tree (AST), Concrete Parse Tree, and Three-Address Code (TAC) generation.">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Google Fonts for crisp typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,7 +27,7 @@
             </div>
             <div>
                 <h1 class="brand-title">LexiTree</h1>
-                <p class="brand-subtitle">Interactive Lexical Analyzer &amp; Syntax Tree Visualizer</p>
+                <p class="brand-subtitle">Lexical Analyzer, Syntax Trees (AST &amp; CST) &amp; Three-Address Code</p>
             </div>
         </div>
 
@@ -209,20 +209,32 @@ result = 2 + 3 * 4;"></textarea>
                 </div>
             </section>
 
-            <!-- Right Column: Abstract Syntax Tree (AST) Visualization -->
+            <!-- Right Column: Tree Visualizers & Three-Address Code -->
             <section class="right-panel">
+                <!-- Tree Visualizer Card (Togglable: AST vs Parse Tree) -->
                 <div class="card ast-card">
                     <div class="card-header">
-                        <div class="card-title">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="5" r="3"></circle>
-                                <path d="M12 8v4"></path>
-                                <circle cx="6" cy="18" r="3"></circle>
-                                <path d="M9 16l-3 -2"></path>
-                                <circle cx="18" cy="18" r="3"></circle>
-                                <path d="M15 16l3 -2"></path>
-                            </svg>
-                            Abstract Syntax Tree (AST)
+                        <div class="view-tabs" role="tablist">
+                            <button id="viewAstTab" class="view-tab active" type="button" role="tab" aria-selected="true" title="View Abstract Syntax Tree (AST)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="5" r="3"></circle>
+                                    <path d="M12 8v4"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <path d="M9 16l-3 -2"></path>
+                                    <circle cx="18" cy="18" r="3"></circle>
+                                    <path d="M15 16l3 -2"></path>
+                                </svg>
+                                Abstract Syntax Tree (AST)
+                            </button>
+                            <button id="viewParseTreeTab" class="view-tab" type="button" role="tab" aria-selected="false" title="View Concrete Syntax Tree (Parse Tree)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
+                                Parse Tree (CST)
+                            </button>
                         </div>
 
                         <!-- Tree View Controls -->
@@ -251,8 +263,8 @@ result = 2 + 3 * 4;"></textarea>
                         </div>
                     </div>
 
-                    <!-- Tree Legend -->
-                    <div class="tree-legend">
+                    <!-- AST Legend -->
+                    <div id="astLegend" class="tree-legend">
                         <span class="legend-item"><span class="legend-chip chip-program"></span> Program</span>
                         <span class="legend-item"><span class="legend-chip chip-assignment"></span> Assignment</span>
                         <span class="legend-item"><span class="legend-chip chip-binary"></span> BinaryOp</span>
@@ -261,9 +273,15 @@ result = 2 + 3 * 4;"></textarea>
                         <span class="legend-item"><span class="legend-chip chip-number"></span> Number</span>
                     </div>
 
-                    <!-- SVG Canvas Container -->
+                    <!-- Parse Tree Legend (Shown when Parse Tree tab is active) -->
+                    <div id="parseTreeLegend" class="tree-legend hidden">
+                        <span class="legend-item"><span class="legend-chip chip-pt-nonterminal"></span> Non-Terminal ⟨symbol⟩</span>
+                        <span class="legend-item"><span class="legend-chip chip-pt-terminal"></span> Terminal [lexeme]</span>
+                        <span class="legend-item"><span class="legend-chip chip-pt-rule"></span> Grammar Production</span>
+                    </div>
+
+                    <!-- AST SVG Canvas Container -->
                     <div id="svgContainer" class="svg-container">
-                        <!-- Custom SVG dynamically rendered by ast-visualizer.js -->
                         <div id="astEmptyState" class="ast-empty-state">
                             <div class="empty-box">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
@@ -271,17 +289,63 @@ result = 2 + 3 * 4;"></textarea>
                                     <path d="M2 17l10 5 10-5"></path>
                                     <path d="M2 12l10 5 10-5"></path>
                                 </svg>
-                                <h3>No Syntax Tree Generated</h3>
-                                <p>Select an example or write code, then press <strong>Analyze Code</strong> to view the tree structure.</p>
+                                <h3>No Abstract Syntax Tree Generated</h3>
+                                <p>Select an example or write code, then press <strong>Analyze Code</strong> to view the tree.</p>
                             </div>
                         </div>
                         <svg id="astSvg" class="ast-svg hidden"></svg>
                     </div>
 
+                    <!-- Parse Tree SVG Canvas Container -->
+                    <div id="parseTreeContainer" class="svg-container hidden">
+                        <div id="parseTreeEmptyState" class="ast-empty-state">
+                            <div class="empty-box">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
+                                <h3>No Concrete Parse Tree Generated</h3>
+                                <p>Write code and click <strong>Analyze Code</strong> to inspect concrete grammar derivation steps.</p>
+                            </div>
+                        </div>
+                        <svg id="parseTreeSvg" class="ast-svg hidden"></svg>
+                    </div>
+
                     <!-- Node Inspector Bar -->
                     <div id="nodeInspector" class="node-inspector">
                         <span class="inspector-label">Node Inspector:</span>
-                        <span id="inspectorInfo" class="inspector-info">Hover or click on any AST node to inspect its properties.</span>
+                        <span id="inspectorInfo" class="inspector-info">Hover or click on any node to inspect its properties.</span>
+                    </div>
+                </div>
+
+                <!-- Intermediate Code (Three-Address Code) Card -->
+                <div class="card tac-card" id="tacCard">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                            </svg>
+                            Intermediate Code (Three-Address Code)
+                            <span id="tacCountBadge" class="count-pill">0 instr</span>
+                        </div>
+                        <button id="copyTacBtn" class="btn btn-secondary btn-sm" type="button" title="Copy Three-Address Code to clipboard">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span id="copyTacBtnText">Copy TAC</span>
+                        </button>
+                    </div>
+                    <div class="tac-body">
+                        <div id="tacEmptyState" class="tac-empty-state">
+                            <p>No intermediate code generated yet. Enter code and click <strong>Analyze Code</strong>.</p>
+                        </div>
+                        <div id="tacContent" class="tac-content hidden">
+                            <ol id="tacList" class="tac-instruction-list"></ol>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -350,15 +414,23 @@ primary     -&gt; NUMBER | IDENTIFIER | "(" expression ")"</pre>
                     <h3>3. Compiler Design Viva Questions &amp; Answers</h3>
                     <div class="qa-item">
                         <p class="qa-q">Q1: What is the difference between a Lexical Analyzer and a Syntax Analyzer?</p>
-                        <p class="qa-a"><strong>Ans:</strong> The <em>Lexical Analyzer (Lexer)</em> converts the stream of input characters into meaningful units called <strong>Tokens</strong>, discarding whitespace and flagging illegal characters. The <em>Syntax Analyzer (Parser)</em> takes this token stream and verifies that it adheres to the formal context-free grammar, constructing an <strong>Abstract Syntax Tree (AST)</strong>.</p>
+                        <p class="qa-a"><strong>Ans:</strong> The <em>Lexical Analyzer (Lexer)</em> converts the stream of input characters into meaningful units called <strong>Tokens</strong>, discarding whitespace and flagging illegal characters. The <em>Syntax Analyzer (Parser)</em> takes this token stream and verifies that it adheres to the formal context-free grammar, constructing a <strong>Parse Tree</strong> and <strong>Abstract Syntax Tree (AST)</strong>.</p>
                     </div>
                     <div class="qa-item">
                         <p class="qa-q">Q2: Why use a Recursive-Descent Parser?</p>
                         <p class="qa-a"><strong>Ans:</strong> A Recursive-Descent Parser is a top-down parsing technique where each non-terminal in the grammar is implemented as a function. It is intuitive, easy to debug, supports unambiguous operator precedence, and gives precise syntax error diagnostics.</p>
                     </div>
                     <div class="qa-item">
-                        <p class="qa-q">Q3: What is the difference between a Parse Tree and an Abstract Syntax Tree (AST)?</p>
-                        <p class="qa-a"><strong>Ans:</strong> A <em>Parse Tree</em> (Concrete Syntax Tree) contains all syntactic details including punctuation and parentheses. An <em>AST</em> retains only the structural, semantic information needed for translation (operators, operands, identifiers) without syntactic noise like semicolons or parentheses.</p>
+                        <p class="qa-q">Q3: What is the difference between a Concrete Parse Tree and an Abstract Syntax Tree (AST)?</p>
+                        <p class="qa-a"><strong>Ans:</strong> A <em>Parse Tree (Concrete Syntax Tree)</em> represents the full derivation according to the grammar rules, explicitly including non-terminals (<code>expression</code>, <code>term</code>) and all terminal punctuation (<code>=</code>, <code>;</code>, <code>(</code>, <code>)</code>). An <em>AST</em> condenses this into a semantic tree retaining only operations and operands, removing syntactic punctuation.</p>
+                    </div>
+                    <div class="qa-item">
+                        <p class="qa-q">Q4: What is Three-Address Code (TAC)?</p>
+                        <p class="qa-a"><strong>Ans:</strong> Three-Address Code (TAC) is an Intermediate Representation (IR) where each instruction has at most one operator and at most three operand addresses (two sources and one destination), typically written as <code>x = y op z</code> or <code>x = op y</code>. It bridges high-level ASTs and low-level target machine code.</p>
+                    </div>
+                    <div class="qa-item">
+                        <p class="qa-q">Q5: How does LexiTree generate TAC from the AST?</p>
+                        <p class="qa-a"><strong>Ans:</strong> LexiTree performs a post-order / bottom-up traversal of the AST. For each binary operation, it first generates TAC for the left and right sub-expressions, assigns the result to a new deterministic temporary variable (<code>t1</code>, <code>t2</code>, ...), and returns the temporary to the parent node.</p>
                     </div>
                 </section>
             </div>
@@ -371,6 +443,7 @@ primary     -&gt; NUMBER | IDENTIFIER | "(" expression ")"</pre>
     <!-- Scripts in proper dependency order -->
     <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ast-visualizer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/parse-tree-visualizer.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

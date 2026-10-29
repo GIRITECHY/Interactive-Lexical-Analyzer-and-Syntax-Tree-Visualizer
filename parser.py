@@ -16,11 +16,14 @@ Operator precedence implemented:
     3. Multiplicative: * / (left-associative)
     4. Additive: + - (left-associative)
 
-Generates an Abstract Syntax Tree (AST) constructed from ast_nodes.py.
+Generates:
+    1. Abstract Syntax Tree (AST) constructed from ast_nodes.py
+    2. Concrete Syntax Tree (Parse Tree) constructed from parse_tree.py
+
 Reports comprehensive syntax error diagnostics with line, column, and suggestions.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from lexer import (
     Token,
     TOKEN_IDENTIFIER,
@@ -44,6 +47,7 @@ from ast_nodes import (
     Number,
     Identifier
 )
+from parse_tree import ParseTreeNode, make_terminal_node
 
 
 class ParserError(Exception):
@@ -73,15 +77,19 @@ class ParserError(Exception):
 class Parser:
     """
     Recursive-descent syntax analyzer for LexiTree.
+    Produces both an Abstract Syntax Tree (AST) and a Concrete Syntax Tree (Parse Tree).
     """
 
     def __init__(self, tokens: List[Token]):
         self.tokens = tokens
         self.current = 0
+        self.ast: Optional[Program] = None
+        self.parse_tree: Optional[ParseTreeNode] = None
 
     def parse(self) -> Program:
         """
-        Parses the token stream into a Program AST node.
+        Parses the token stream into a Program AST node and constructs the corresponding Parse Tree.
+        Sets self.ast and self.parse_tree.
         Raises ParserError on any grammatical violation.
         """
         # Empty input check (only EOF token present)
@@ -93,17 +101,45 @@ class Parser:
                 suggestion="Enter at least one assignment statement, e.g., 'x = 10;'."
             )
 
-        statements: List[ASTNode] = []
-        while not self._is_at_end():
-            statements.append(self._statement())
+        statements_ast: List[ASTNode] = []
+        statements_cst: List[ParseTreeNode] = []
 
-        return Program(statements=statements)
+        while not self._is_at_end():
+            stmt_ast, stmt_cst = self._statement()
+            statements_ast.append(stmt_ast)
+            statements_cst.append(stmt_cst)
+
+        self.ast = Program(statements=statements_ast)
+
+        # Build root Parse Tree node
+        cst_children = list(statements_cst)
+        if self._check(TOKEN_EOF) and self.current < len(self.tokens):
+            cst_children.append(make_terminal_node(self.tokens[self.current]))
+
+        self.parse_tree = ParseTreeNode(
+            symbol="program",
+            label="program",
+            kind="nonterminal",
+            children=cst_children,
+            production="program -> statement*"
+        )
+
+        return self.ast
+
+    def get_parse_tree(self) -> Optional[ParseTreeNode]:
+        """Returns the Parse Tree generated during the most recent parse pass."""
+        return self.parse_tree
+
+    def parse_all(self) -> Tuple[Program, Optional[ParseTreeNode]]:
+        """Convenience method returning both AST and Parse Tree."""
+        ast = self.parse()
+        return ast, self.parse_tree
 
     # -------------------------------------------------------------------------
     # Grammar Rules
     # -------------------------------------------------------------------------
 
-    def _statement(self) -> Assignment:
+    def _statement(self) -> Tuple[Assignment, ParseTreeNode]:
         """
         statement -> IDENTIFIER "=" expression ";"
         """
@@ -143,6 +179,7 @@ class Parser:
         # 1. Target Identifier
         ident_token = self._advance()
         target = Identifier(name=ident_token.lexeme, line=ident_token.line, column=ident_token.column)
+        ident_cst = make_terminal_node(ident_token)
 
         # 2. Assignment Operator "="
         if not self._check(TOKEN_ASSIGN):
@@ -153,10 +190,11 @@ class Parser:
                 column=next_tok.column,
                 suggestion=f"Insert '=' after the variable name (e.g., '{ident_token.lexeme} = ...;')."
             )
-        self._advance()  # consume "="
+        assign_token = self._advance()  # consume "="
+        assign_cst = make_terminal_node(assign_token)
 
         # 3. Expression
-        expr_value = self._expression()
+        expr_ast, expr_cst = self._expression()
 
         # 4. Semicolon ";"
         if not self._check(TOKEN_SEMICOLON):
@@ -174,73 +212,139 @@ class Parser:
                 column=next_tok.column,
                 suggestion="Add a trailing semicolon ';' to terminate the statement."
             )
-        self._advance()  # consume ";"
+        semi_token = self._advance()  # consume ";"
+        semi_cst = make_terminal_node(semi_token)
 
-        return Assignment(
+        ast_node = Assignment(
             identifier=target,
-            value=expr_value,
+            value=expr_ast,
             line=ident_token.line,
             column=ident_token.column
         )
 
-    def _expression(self) -> ASTNode:
+        cst_node = ParseTreeNode(
+            symbol="statement",
+            label="statement",
+            kind="nonterminal",
+            children=[ident_cst, assign_cst, expr_cst, semi_cst],
+            production="statement -> IDENTIFIER = expression ;",
+            line=ident_token.line,
+            column=ident_token.column
+        )
+
+        return ast_node, cst_node
+
+    def _expression(self) -> Tuple[ASTNode, ParseTreeNode]:
         """
         expression -> term (("+" | "-") term)*
         Left-associative binary addition and subtraction.
         """
-        node = self._term()
+        node_ast, node_cst = self._term()
+        cst_children = [node_cst]
+        has_ops = False
 
         while self._match(TOKEN_PLUS, TOKEN_MINUS):
+            has_ops = True
             op_token = self._previous()
-            right = self._term()
-            node = BinaryOp(
+            op_cst = make_terminal_node(op_token)
+            right_ast, right_cst = self._term()
+            node_ast = BinaryOp(
                 operator=op_token.lexeme,
-                left=node,
-                right=right,
+                left=node_ast,
+                right=right_ast,
                 line=op_token.line,
                 column=op_token.column
             )
+            cst_children.extend([op_cst, right_cst])
 
-        return node
+        production = "expression -> term (('+' | '-') term)*" if has_ops else "expression -> term"
+        cst_node = ParseTreeNode(
+            symbol="expression",
+            label="expression",
+            kind="nonterminal",
+            children=cst_children,
+            production=production,
+            line=cst_children[0].line if cst_children else None,
+            column=cst_children[0].column if cst_children else None
+        )
 
-    def _term(self) -> ASTNode:
+        return node_ast, cst_node
+
+    def _term(self) -> Tuple[ASTNode, ParseTreeNode]:
         """
         term -> unary (("*" | "/") unary)*
         Left-associative binary multiplication and division.
         """
-        node = self._unary()
+        node_ast, node_cst = self._unary()
+        cst_children = [node_cst]
+        has_ops = False
 
         while self._match(TOKEN_STAR, TOKEN_SLASH):
+            has_ops = True
             op_token = self._previous()
-            right = self._unary()
-            node = BinaryOp(
+            op_cst = make_terminal_node(op_token)
+            right_ast, right_cst = self._unary()
+            node_ast = BinaryOp(
                 operator=op_token.lexeme,
-                left=node,
-                right=right,
+                left=node_ast,
+                right=right_ast,
                 line=op_token.line,
                 column=op_token.column
             )
+            cst_children.extend([op_cst, right_cst])
 
-        return node
+        production = "term -> unary (('*' | '/') unary)*" if has_ops else "term -> unary"
+        cst_node = ParseTreeNode(
+            symbol="term",
+            label="term",
+            kind="nonterminal",
+            children=cst_children,
+            production=production,
+            line=cst_children[0].line if cst_children else None,
+            column=cst_children[0].column if cst_children else None
+        )
 
-    def _unary(self) -> ASTNode:
+        return node_ast, cst_node
+
+    def _unary(self) -> Tuple[ASTNode, ParseTreeNode]:
         """
         unary -> ("+" | "-") unary | primary
         Right-recursive prefix unary plus and minus.
         """
         if self._match(TOKEN_PLUS, TOKEN_MINUS):
             op_token = self._previous()
-            operand = self._unary()
-            return UnaryOp(
+            op_cst = make_terminal_node(op_token)
+            operand_ast, operand_cst = self._unary()
+            ast_node = UnaryOp(
                 operator=op_token.lexeme,
-                operand=operand,
+                operand=operand_ast,
                 line=op_token.line,
                 column=op_token.column
             )
+            cst_node = ParseTreeNode(
+                symbol="unary",
+                label="unary",
+                kind="nonterminal",
+                children=[op_cst, operand_cst],
+                production=f"unary -> {op_token.lexeme} unary",
+                line=op_token.line,
+                column=op_token.column
+            )
+            return ast_node, cst_node
 
-        return self._primary()
+        prim_ast, prim_cst = self._primary()
+        cst_node = ParseTreeNode(
+            symbol="unary",
+            label="unary",
+            kind="nonterminal",
+            children=[prim_cst],
+            production="unary -> primary",
+            line=prim_cst.line,
+            column=prim_cst.column
+        )
+        return prim_ast, cst_node
 
-    def _primary(self) -> ASTNode:
+    def _primary(self) -> Tuple[ASTNode, ParseTreeNode]:
         """
         primary -> NUMBER | IDENTIFIER | "(" expression ")"
         """
@@ -249,26 +353,49 @@ class Parser:
         # Number literal
         if self._match(TOKEN_NUMBER):
             num_tok = self._previous()
-            return Number(
+            ast_node = Number(
                 value=num_tok.value,
                 raw=num_tok.lexeme,
                 line=num_tok.line,
                 column=num_tok.column
             )
+            num_cst = make_terminal_node(num_tok)
+            cst_node = ParseTreeNode(
+                symbol="primary",
+                label="primary",
+                kind="nonterminal",
+                children=[num_cst],
+                production="primary -> NUMBER",
+                line=num_tok.line,
+                column=num_tok.column
+            )
+            return ast_node, cst_node
 
         # Identifier
         if self._match(TOKEN_IDENTIFIER):
             ident_tok = self._previous()
-            return Identifier(
+            ast_node = Identifier(
                 name=ident_tok.lexeme,
                 line=ident_tok.line,
                 column=ident_tok.column
             )
+            ident_cst = make_terminal_node(ident_tok)
+            cst_node = ParseTreeNode(
+                symbol="primary",
+                label="primary",
+                kind="nonterminal",
+                children=[ident_cst],
+                production="primary -> IDENTIFIER",
+                line=ident_tok.line,
+                column=ident_tok.column
+            )
+            return ast_node, cst_node
 
         # Parenthesized expression "(" expression ")"
         if self._match(TOKEN_LPAREN):
             lparen_tok = self._previous()
-            expr = self._expression()
+            lparen_cst = make_terminal_node(lparen_tok)
+            expr_ast, expr_cst = self._expression()
             if not self._match(TOKEN_RPAREN):
                 curr = self._peek()
                 raise ParserError(
@@ -277,7 +404,19 @@ class Parser:
                     column=curr.column,
                     suggestion="Add a closing parenthesis ')' to properly close the sub-expression."
                 )
-            return expr
+            rparen_tok = self._previous()
+            rparen_cst = make_terminal_node(rparen_tok)
+
+            cst_node = ParseTreeNode(
+                symbol="primary",
+                label="primary",
+                kind="nonterminal",
+                children=[lparen_cst, expr_cst, rparen_cst],
+                production="primary -> ( expression )",
+                line=lparen_tok.line,
+                column=lparen_tok.column
+            )
+            return expr_ast, cst_node
 
         # Unmatched closing parenthesis
         if self._check(TOKEN_RPAREN):

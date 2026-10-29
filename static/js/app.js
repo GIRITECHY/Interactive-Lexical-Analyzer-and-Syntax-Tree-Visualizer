@@ -1,14 +1,16 @@
 /**
  * app.js - Main Client Application Orchestrator for LexiTree
- * Coordinates Editor, Token Table, AST Visualizer, and Flask API calls.
+ * Coordinates Editor, Token Table, AST Visualizer, Parse Tree Visualizer,
+ * Three-Address Code Generator display, and Flask API calls.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Initialize components
+    // 1. Initialize Visualizer & Editor Components
     EditorModule.init();
     AstVisualizer.init();
+    ParseTreeVisualizer.init();
 
-    // DOM Elements
+    // 2. DOM Elements
     const analyzeBtn = document.getElementById("analyzeBtn");
     const clearBtn = document.getElementById("clearBtn");
     const tokenTableBody = document.getElementById("tokenTableBody");
@@ -25,19 +27,122 @@ document.addEventListener("DOMContentLoaded", () => {
     const errorSuggestion = document.getElementById("errorSuggestion");
     const dismissErrorBtn = document.getElementById("dismissErrorBtn");
 
-    let currentTokens = [];
+    // Tree View Switcher Elements
+    const viewAstTab = document.getElementById("viewAstTab");
+    const viewParseTreeTab = document.getElementById("viewParseTreeTab");
+    const astLegend = document.getElementById("astLegend");
+    const parseTreeLegend = document.getElementById("parseTreeLegend");
+    const astContainer = document.getElementById("svgContainer");
+    const parseTreeContainer = document.getElementById("parseTreeContainer");
+    const zoomInBtn = document.getElementById("zoomInBtn");
+    const zoomOutBtn = document.getElementById("zoomOutBtn");
+    const resetZoomBtn = document.getElementById("resetZoomBtn");
+    const inspectorInfo = document.getElementById("inspectorInfo");
 
-    // Event Bindings
+    // Three-Address Code (TAC) Elements
+    const tacCountBadge = document.getElementById("tacCountBadge");
+    const tacEmptyState = document.getElementById("tacEmptyState");
+    const tacContent = document.getElementById("tacContent");
+    const tacList = document.getElementById("tacList");
+    const copyTacBtn = document.getElementById("copyTacBtn");
+    const copyTacBtnText = document.getElementById("copyTacBtnText");
+
+    // State Variables
+    let currentTokens = [];
+    let currentTac = [];
+    let activeTreeView = "ast"; // "ast" or "parse-tree"
+
+    // 3. Event Bindings
     analyzeBtn.addEventListener("click", runAnalysis);
     clearBtn.addEventListener("click", handleClearAll);
     tokenSearch.addEventListener("input", filterTokenTable);
     dismissErrorBtn.addEventListener("click", () => errorPanel.classList.add("hidden"));
 
+    // View Switcher Tabs
+    if (viewAstTab && viewParseTreeTab) {
+        viewAstTab.addEventListener("click", () => switchTreeView("ast"));
+        viewParseTreeTab.addEventListener("click", () => switchTreeView("parse-tree"));
+    }
+
+    // Zoom & Pan Unified Controls
+    if (zoomInBtn) {
+        zoomInBtn.addEventListener("click", () => {
+            if (activeTreeView === "ast") {
+                AstVisualizer.zoom(0.15);
+            } else {
+                ParseTreeVisualizer.zoom(0.15);
+            }
+        });
+    }
+
+    if (zoomOutBtn) {
+        zoomOutBtn.addEventListener("click", () => {
+            if (activeTreeView === "ast") {
+                AstVisualizer.zoom(-0.15);
+            } else {
+                ParseTreeVisualizer.zoom(-0.15);
+            }
+        });
+    }
+
+    if (resetZoomBtn) {
+        resetZoomBtn.addEventListener("click", () => {
+            if (activeTreeView === "ast") {
+                AstVisualizer.resetView();
+            } else {
+                ParseTreeVisualizer.resetView();
+            }
+        });
+    }
+
+    // Copy TAC Button
+    if (copyTacBtn) {
+        copyTacBtn.addEventListener("click", handleCopyTac);
+    }
+
     // Auto-run analysis on page load with initial default starter code
     runAnalysis();
 
     /**
-     * Executes the lexical and syntax analysis pipeline via the backend API.
+     * Switches between AST and Parse Tree views.
+     */
+    function switchTreeView(view) {
+        activeTreeView = view;
+        if (view === "ast") {
+            viewAstTab.classList.add("active");
+            viewAstTab.setAttribute("aria-selected", "true");
+            viewParseTreeTab.classList.remove("active");
+            viewParseTreeTab.setAttribute("aria-selected", "false");
+
+            astLegend.classList.remove("hidden");
+            parseTreeLegend.classList.add("hidden");
+
+            astContainer.classList.remove("hidden");
+            parseTreeContainer.classList.add("hidden");
+
+            if (inspectorInfo) {
+                inspectorInfo.textContent = "Hover or click on any AST node to inspect its properties.";
+            }
+        } else {
+            viewParseTreeTab.classList.add("active");
+            viewParseTreeTab.setAttribute("aria-selected", "true");
+            viewAstTab.classList.remove("active");
+            viewAstTab.setAttribute("aria-selected", "false");
+
+            parseTreeLegend.classList.remove("hidden");
+            astLegend.classList.add("hidden");
+
+            parseTreeContainer.classList.remove("hidden");
+            astContainer.classList.add("hidden");
+
+            if (inspectorInfo) {
+                inspectorInfo.textContent = "Hover or click on any Parse Tree node (non-terminal or terminal) to inspect grammar details.";
+            }
+        }
+    }
+
+    /**
+     * Executes the lexical, syntax, AST, CST, and TAC analysis pipeline via the backend API.
      */
     async function runAnalysis() {
         const sourceCode = EditorModule.getCode();
@@ -64,6 +169,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 showError("Lexical Error", firstErr.message, firstErr.line, firstErr.column, firstErr.suggestion);
                 setSystemStatus("error", `Lexical Error at ${firstErr.line}:${firstErr.column}`);
                 AstVisualizer.clear();
+                ParseTreeVisualizer.clear();
+                renderTac([]);
                 return;
             }
 
@@ -73,6 +180,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 showError("Syntax Error", err.message, err.line, err.column, err.suggestion);
                 setSystemStatus("error", `Syntax Error at ${err.line}:${err.column}`);
                 AstVisualizer.clear();
+                ParseTreeVisualizer.clear();
+                renderTac([]);
                 return;
             }
 
@@ -80,11 +189,27 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.success && data.ast) {
                 hideError();
                 setSystemStatus("success", "Analysis Successful");
+
+                // Render Abstract Syntax Tree (AST)
                 AstVisualizer.render(data.ast);
+
+                // Render Concrete Parse Tree (CST)
+                if (data.parse_tree) {
+                    ParseTreeVisualizer.render(data.parse_tree);
+                } else {
+                    ParseTreeVisualizer.clear();
+                }
+
+                // Render Three-Address Code (TAC)
+                currentTac = data.intermediate_code || [];
+                renderTac(currentTac);
+
             } else {
-                showError("Analysis Error", "Failed to construct Abstract Syntax Tree.", 1, 1, "Verify expression syntax.");
+                showError("Analysis Error", "Failed to construct syntax tree.", 1, 1, "Verify expression syntax.");
                 setSystemStatus("error", "Analysis Incomplete");
                 AstVisualizer.clear();
+                ParseTreeVisualizer.clear();
+                renderTac([]);
             }
 
         } catch (err) {
@@ -92,6 +217,57 @@ document.addEventListener("DOMContentLoaded", () => {
             showError("Network Error", "Unable to connect to local Flask server.", 1, 1, "Ensure the server is running on http://127.0.0.1:5000");
             setSystemStatus("error", "Server Disconnected");
             AstVisualizer.clear();
+            ParseTreeVisualizer.clear();
+            renderTac([]);
+        }
+    }
+
+    /**
+     * Renders Three-Address Code instructions into the TAC card.
+     */
+    function renderTac(instructions) {
+        currentTac = instructions || [];
+        tacCountBadge.textContent = `${currentTac.length} instr`;
+
+        if (currentTac.length === 0) {
+            tacEmptyState.classList.remove("hidden");
+            tacContent.classList.add("hidden");
+            tacList.innerHTML = "";
+            return;
+        }
+
+        tacEmptyState.classList.add("hidden");
+        tacContent.classList.remove("hidden");
+        tacList.innerHTML = "";
+
+        currentTac.forEach((instr) => {
+            const li = document.createElement("li");
+            li.textContent = instr;
+            tacList.appendChild(li);
+        });
+    }
+
+    /**
+     * Copies Three-Address Code instructions to system clipboard.
+     */
+    async function handleCopyTac() {
+        if (!currentTac || currentTac.length === 0) {
+            return;
+        }
+
+        const fullText = currentTac.join("\n");
+        try {
+            await navigator.clipboard.writeText(fullText);
+            const originalText = copyTacBtnText.textContent;
+            copyTacBtnText.textContent = "Copied!";
+            copyTacBtn.classList.add("btn-success");
+
+            setTimeout(() => {
+                copyTacBtnText.textContent = originalText;
+                copyTacBtn.classList.remove("btn-success");
+            }, 1800);
+        } catch (err) {
+            console.error("Clipboard copy failed:", err);
         }
     }
 
@@ -211,6 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
         hideError();
         setSystemStatus("idle", "System Ready");
         currentTokens = [];
+        currentTac = [];
         tokenCountBadge.textContent = "0";
         tokenTableBody.innerHTML = `
             <tr class="empty-row">
@@ -223,5 +400,10 @@ document.addEventListener("DOMContentLoaded", () => {
             </tr>
         `;
         AstVisualizer.clear();
+        ParseTreeVisualizer.clear();
+        renderTac([]);
+        if (inspectorInfo) {
+            inspectorInfo.textContent = "Hover or click on any node to inspect its properties.";
+        }
     }
 });

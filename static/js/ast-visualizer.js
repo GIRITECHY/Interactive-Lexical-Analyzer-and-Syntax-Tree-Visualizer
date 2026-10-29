@@ -4,10 +4,12 @@
  * Renders Abstract Syntax Trees using native SVG elements without any
  * third-party visualization libraries.
  * Features:
- * - Hierarchical top-to-bottom layout with guaranteed non-overlapping nodes.
+ * - Guaranteed non-overlapping hierarchical top-to-bottom layout.
  * - Multi-statement program support.
- * - Distinct color-coding and iconography per AST node type.
- * - Interactive node inspection (hover/click).
+ * - Advanced branch & path highlighting on hover (ancestor + subtree focus).
+ * - Click-to-pin inspector locking with active visual aura.
+ * - Sleek card design with coordinate badges (L:C) and type indicators.
+ * - Rock-solid stationary hover feedback (no boundary jitter / dancing).
  * - Zoom in / Zoom out / Pan / Reset controls.
  */
 
@@ -20,14 +22,14 @@ const AstVisualizer = (() => {
     const PADDING_X = 40;
     const PADDING_Y = 40;
 
-    // Node Type Color Palette (Light theme tailored HSL/Hex)
+    // Node Type Color Palette
     const COLOR_SCHEMES = {
-        Program:    { fill: "#e0e7ff", stroke: "#6366f1", textType: "#4338ca", textVal: "#1e1b4b" },
-        Assignment: { fill: "#eff6ff", stroke: "#3b82f6", textType: "#1d4ed8", textVal: "#1e3a8a" },
-        BinaryOp:   { fill: "#f0fdf4", stroke: "#10b981", textType: "#047857", textVal: "#064e3b" },
-        UnaryOp:    { fill: "#fffbeb", stroke: "#f59e0b", textType: "#b45309", textVal: "#78350f" },
-        Identifier: { fill: "#faf5ff", stroke: "#8b5cf6", textType: "#6d28d9", textVal: "#4c1d95" },
-        Number:     { fill: "#fff1f2", stroke: "#f43f5e", textType: "#be123c", textVal: "#881337" }
+        Program:    { fill: "#e0e7ff", stroke: "#6366f1", label: "PROGRAM" },
+        Assignment: { fill: "#eff6ff", stroke: "#3b82f6", label: "ASSIGN" },
+        BinaryOp:   { fill: "#f0fdf4", stroke: "#10b981", label: "BINARY OP" },
+        UnaryOp:    { fill: "#fffbeb", stroke: "#f59e0b", label: "UNARY OP" },
+        Identifier: { fill: "#faf5ff", stroke: "#8b5cf6", label: "ID" },
+        Number:     { fill: "#fff1f2", stroke: "#f43f5e", label: "NUMBER" }
     };
 
     let svgElement, emptyStateElement, containerElement, inspectorInfo;
@@ -39,6 +41,10 @@ const AstVisualizer = (() => {
     let startPanY = 0;
     let currentTreeRoot = null;
 
+    let allNodes = [];
+    let allLinks = [];
+    let selectedNode = null;
+
     function init() {
         svgElement = document.getElementById("astSvg");
         emptyStateElement = document.getElementById("astEmptyState");
@@ -46,86 +52,94 @@ const AstVisualizer = (() => {
         inspectorInfo = document.getElementById("inspectorInfo");
 
         // Pan and Zoom controls
-        document.getElementById("zoomInBtn").addEventListener("click", () => zoom(0.15));
-        document.getElementById("zoomOutBtn").addEventListener("click", () => zoom(-0.15));
-        document.getElementById("resetZoomBtn").addEventListener("click", resetView);
+        const zoomIn = document.getElementById("zoomInBtn");
+        const zoomOut = document.getElementById("zoomOutBtn");
+        const resetBtn = document.getElementById("resetZoomBtn");
+
+        if (zoomIn) zoomIn.addEventListener("click", () => zoom(0.15));
+        if (zoomOut) zoomOut.addEventListener("click", () => zoom(-0.15));
+        if (resetBtn) resetBtn.addEventListener("click", resetView);
 
         // Container mouse drag panning
-        containerElement.addEventListener("mousedown", handleMouseDown);
-        window.addEventListener("mousemove", handleMouseMove);
-        window.addEventListener("mouseup", handleMouseUp);
-        containerElement.addEventListener("wheel", handleWheel, { passive: false });
+        if (containerElement) {
+            containerElement.addEventListener("mousedown", handleMouseDown);
+            window.addEventListener("mousemove", handleMouseMove);
+            window.addEventListener("mouseup", handleMouseUp);
+            containerElement.addEventListener("wheel", handleWheel, { passive: false });
+        }
+
+        // Clicking on canvas background unpins any active selection
+        if (svgElement) {
+            svgElement.addEventListener("click", (e) => {
+                if (e.target === svgElement || e.target.id === "astTransformGroup") {
+                    deselectNode();
+                }
+            });
+        }
     }
 
     function clear() {
+        if (!svgElement) return;
         svgElement.innerHTML = "";
         svgElement.classList.add("hidden");
-        emptyStateElement.classList.remove("hidden");
+        if (emptyStateElement) emptyStateElement.classList.remove("hidden");
         currentTreeRoot = null;
-        inspectorInfo.innerText = "Hover or click on any AST node to inspect its properties.";
+        allNodes = [];
+        allLinks = [];
+        selectedNode = null;
+        if (inspectorInfo) {
+            inspectorInfo.textContent = "Hover or click on any AST node to inspect its properties.";
+        }
     }
 
     /**
-     * Converts JSON AST into visual tree structure.
+     * Converts JSON AST into visual tree structure with parent links.
      */
-    function buildVisualTree(node) {
+    function buildVisualTree(node, parent = null) {
         if (!node) return null;
 
         let type = node.type;
         let title = type;
         let val = "";
-        let children = [];
         let details = "";
+        let line = node.line || 1;
+        let column = node.column || 1;
 
         switch (type) {
             case "Program":
                 title = "Program";
                 val = `${node.statements.length} stmt${node.statements.length === 1 ? '' : 's'}`;
-                children = (node.statements || []).map(buildVisualTree);
                 details = `Program root containing ${node.statements.length} statement(s).`;
                 break;
 
             case "Assignment":
                 title = "Assignment";
                 val = "=";
-                children = [
-                    buildVisualTree(node.identifier),
-                    buildVisualTree(node.value)
-                ];
-                details = `Assignment: Variable '${node.identifier.name}' assigned at line ${node.line}, col ${node.column}.`;
+                details = `Variable '${node.identifier.name}' assigned at line ${line}, col ${column}.`;
                 break;
 
             case "BinaryOp":
                 title = "BinaryOp";
                 val = node.operator;
-                children = [
-                    buildVisualTree(node.left),
-                    buildVisualTree(node.right)
-                ];
-                details = `Binary Operation '${node.operator}' at line ${node.line}, col ${node.column}.`;
+                details = `Binary Operation '${node.operator}' at line ${line}, col ${column}.`;
                 break;
 
             case "UnaryOp":
                 title = "UnaryOp";
                 val = node.operator;
-                children = [
-                    buildVisualTree(node.operand)
-                ];
-                details = `Unary Operator '${node.operator}' at line ${node.line}, col ${node.column}.`;
+                details = `Unary Operator '${node.operator}' at line ${line}, col ${column}.`;
                 break;
 
             case "Number":
                 title = "Number";
                 val = String(node.raw !== undefined ? node.raw : node.value);
-                children = [];
-                details = `Literal Constant ${val} (numeric value: ${node.value}) at line ${node.line}, col ${node.column}.`;
+                details = `Literal Constant ${val} (numeric value: ${node.value}) at line ${line}, col ${column}.`;
                 break;
 
             case "Identifier":
                 title = "Identifier";
                 val = node.name;
-                children = [];
-                details = `Variable Identifier '${node.name}' at line ${node.line}, col ${node.column}.`;
+                details = `Variable Identifier '${node.name}' at line ${line}, col ${column}.`;
                 break;
 
             default:
@@ -133,17 +147,43 @@ const AstVisualizer = (() => {
                 details = `Unknown node ${type}`;
         }
 
-        return {
+        const visualNode = {
+            id: null,
             type,
             title,
             val,
             details,
+            line,
+            column,
             rawNode: node,
-            children: children.filter(Boolean),
+            parent: parent,
+            children: [],
+            parentLink: null,
+            domElement: null,
             x: 0,
             y: 0,
             subtreeWidth: 0
         };
+
+        if (type === "Program") {
+            visualNode.children = (node.statements || []).map(s => buildVisualTree(s, visualNode)).filter(Boolean);
+        } else if (type === "Assignment") {
+            visualNode.children = [
+                buildVisualTree(node.identifier, visualNode),
+                buildVisualTree(node.value, visualNode)
+            ].filter(Boolean);
+        } else if (type === "BinaryOp") {
+            visualNode.children = [
+                buildVisualTree(node.left, visualNode),
+                buildVisualTree(node.right, visualNode)
+            ].filter(Boolean);
+        } else if (type === "UnaryOp") {
+            visualNode.children = [
+                buildVisualTree(node.operand, visualNode)
+            ].filter(Boolean);
+        }
+
+        return visualNode;
     }
 
     /**
@@ -198,16 +238,114 @@ const AstVisualizer = (() => {
      * Collect all nodes and connecting links for rendering.
      */
     function collectGraph(node, nodesOut, linksOut) {
+        node.id = "ast-node-" + nodesOut.length;
         nodesOut.push(node);
         node.children.forEach(child => {
-            linksOut.push({
+            const linkObj = {
+                source: node,
+                target: child,
                 x1: node.x + NODE_WIDTH / 2,
                 y1: node.y + NODE_HEIGHT,
                 x2: child.x + NODE_WIDTH / 2,
-                y2: child.y
-            });
+                y2: child.y,
+                domElement: null
+            };
+            child.parentLink = linkObj;
+            linksOut.push(linkObj);
             collectGraph(child, nodesOut, linksOut);
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Advanced Branch & Path Highlighting
+    // -------------------------------------------------------------------------
+
+    function highlightBranch(targetNode) {
+        if (!targetNode) return;
+        const activeNodes = new Set();
+        const activeLinks = new Set();
+
+        // 1. Ancestor chain to root
+        let curr = targetNode;
+        while (curr) {
+            activeNodes.add(curr);
+            if (curr.parentLink) activeLinks.add(curr.parentLink);
+            curr = curr.parent;
+        }
+
+        // 2. Descendant subtree
+        function addDescendants(n) {
+            activeNodes.add(n);
+            if (n.children) {
+                n.children.forEach(c => {
+                    if (c.parentLink) activeLinks.add(c.parentLink);
+                    addDescendants(c);
+                });
+            }
+        }
+        addDescendants(targetNode);
+
+        // Apply classes
+        allNodes.forEach(n => {
+            if (n.domElement) {
+                if (activeNodes.has(n)) {
+                    n.domElement.classList.add("node-highlighted");
+                    n.domElement.classList.remove("node-dimmed");
+                } else {
+                    n.domElement.classList.remove("node-highlighted");
+                    n.domElement.classList.add("node-dimmed");
+                }
+            }
+        });
+
+        allLinks.forEach(l => {
+            if (l.domElement) {
+                if (activeLinks.has(l)) {
+                    l.domElement.classList.add("link-highlighted");
+                    l.domElement.classList.remove("link-dimmed");
+                } else {
+                    l.domElement.classList.remove("link-highlighted");
+                    l.domElement.classList.add("link-dimmed");
+                }
+            }
+        });
+    }
+
+    function clearHighlight() {
+        if (selectedNode) {
+            highlightBranch(selectedNode);
+            return;
+        }
+        allNodes.forEach(n => {
+            if (n.domElement) n.domElement.classList.remove("node-highlighted", "node-dimmed");
+        });
+        allLinks.forEach(l => {
+            if (l.domElement) l.domElement.classList.remove("link-highlighted", "link-dimmed");
+        });
+    }
+
+    function updateInspector(node, isPinned = false) {
+        if (!inspectorInfo) return;
+        if (!node) {
+            inspectorInfo.textContent = "Hover or click on any AST node to inspect its properties.";
+            return;
+        }
+
+        const pinBadge = isPinned ? `<span class="inspector-badge badge-pinned">PINNED</span> ` : "";
+        const typeBadge = `<span class="inspector-badge badge-ast">${node.title}</span>`;
+        const posBadge = (node.line !== undefined && node.column !== undefined)
+            ? `<span class="inspector-pos">L${node.line}:C${node.column}</span>`
+            : "";
+        inspectorInfo.innerHTML = `${pinBadge}${typeBadge} <strong>${node.val}</strong> &mdash; ${node.details} ${posBadge}`;
+    }
+
+    function deselectNode() {
+        if (selectedNode && selectedNode.domElement) {
+            selectedNode.domElement.classList.remove("node-selected");
+        }
+        selectedNode = null;
+        clearHighlight();
+        updateInspector(null);
     }
 
     /**
@@ -219,9 +357,7 @@ const AstVisualizer = (() => {
             return;
         }
 
-        // Determine effective root:
-        // If Program has exactly 1 statement, render that statement as the tree root for clarity,
-        // or render Program if multiple statements exist.
+        // Determine effective root
         let rootNodeToRender = ast;
         if (ast.type === "Program" && ast.statements && ast.statements.length === 1) {
             rootNodeToRender = ast.statements[0];
@@ -237,13 +373,14 @@ const AstVisualizer = (() => {
         computeSubtreeWidth(visualRoot);
         assignPositions(visualRoot, PADDING_X, 0);
 
-        const nodes = [];
-        const links = [];
-        collectGraph(visualRoot, nodes, links);
+        allNodes = [];
+        allLinks = [];
+        selectedNode = null;
+        collectGraph(visualRoot, allNodes, allLinks);
 
         // Calculate bounding box
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        nodes.forEach(n => {
+        allNodes.forEach(n => {
             minX = Math.min(minX, n.x);
             maxX = Math.max(maxX, n.x + NODE_WIDTH);
             minY = Math.min(minY, n.y);
@@ -254,7 +391,7 @@ const AstVisualizer = (() => {
         const totalHeight = Math.max(450, maxY + PADDING_Y);
 
         // Hide empty state, reveal SVG
-        emptyStateElement.classList.add("hidden");
+        if (emptyStateElement) emptyStateElement.classList.add("hidden");
         svgElement.classList.remove("hidden");
         svgElement.innerHTML = "";
 
@@ -262,11 +399,11 @@ const AstVisualizer = (() => {
         svgElement.setAttribute("width", totalWidth);
         svgElement.setAttribute("height", totalHeight);
 
-        // Add SVG Gradients & Drop Shadows
+        // SVG Gradients & Drop Shadows
         const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
         defs.innerHTML = `
             <filter id="nodeCardShadow" x="-15%" y="-15%" width="130%" height="135%">
-                <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1e1b4b" flood-opacity="0.10" />
+                <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#1e1b4b" flood-opacity="0.10" />
             </filter>
             <linearGradient id="grad-Program" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stop-color="#4f46e5" />
@@ -300,10 +437,11 @@ const AstVisualizer = (() => {
         gMaster.id = "astTransformGroup";
         svgElement.appendChild(gMaster);
 
-        // 1. Render connecting links with gradient stroke & junction dots
-        links.forEach(link => {
+        // 1. Render connecting links
+        allLinks.forEach(link => {
             const gLink = document.createElementNS("http://www.w3.org/2000/svg", "g");
             gLink.setAttribute("class", "ast-link-group");
+            link.domElement = gLink;
 
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             const dy = (link.y2 - link.y1) * 0.55;
@@ -319,7 +457,7 @@ const AstVisualizer = (() => {
             const dot1 = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             dot1.setAttribute("cx", link.x1);
             dot1.setAttribute("cy", link.y1);
-            dot1.setAttribute("r", "3.5");
+            dot1.setAttribute("r", "3.2");
             dot1.setAttribute("fill", "#6366f1");
             gLink.appendChild(dot1);
 
@@ -327,77 +465,115 @@ const AstVisualizer = (() => {
             const dot2 = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             dot2.setAttribute("cx", link.x2);
             dot2.setAttribute("cy", link.y2);
-            dot2.setAttribute("r", "3.5");
+            dot2.setAttribute("r", "3.2");
             dot2.setAttribute("fill", "#6366f1");
             gLink.appendChild(dot2);
 
             gMaster.appendChild(gLink);
         });
 
-        // 2. Render tree nodes with two-tone header card design
-        nodes.forEach(node => {
+        // 2. Render tree nodes
+        allNodes.forEach(node => {
             const gNode = document.createElementNS("http://www.w3.org/2000/svg", "g");
             gNode.setAttribute("class", "ast-node");
             gNode.setAttribute("transform", `translate(${node.x}, ${node.y})`);
+            node.domElement = gNode;
 
             const colors = COLOR_SCHEMES[node.type] || COLOR_SCHEMES.Assignment;
 
-            // Card Base Rectangle with drop shadow
+            // Card Base Rectangle with drop shadow & stable 2px stroke
             const cardBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            cardBg.setAttribute("class", "card-bg");
             cardBg.setAttribute("width", NODE_WIDTH);
             cardBg.setAttribute("height", NODE_HEIGHT);
             cardBg.setAttribute("fill", "#ffffff");
             cardBg.setAttribute("stroke", colors.stroke);
-            cardBg.setAttribute("stroke-width", "1.8");
+            cardBg.setAttribute("stroke-width", "2");
             cardBg.setAttribute("rx", "10");
             cardBg.setAttribute("ry", "10");
             cardBg.setAttribute("filter", "url(#nodeCardShadow)");
             gNode.appendChild(cardBg);
 
-            // Top Header Banner with gradient fill
+            // Top Header Accent Banner with gradient fill
             const headerBanner = document.createElementNS("http://www.w3.org/2000/svg", "path");
             const w = NODE_WIDTH;
             const r = 10;
-            const hHeader = 22;
+            const hHeader = 20;
             const bannerPath = `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${hHeader} L 0 ${hHeader} Z`;
             headerBanner.setAttribute("d", bannerPath);
             headerBanner.setAttribute("fill", `url(#grad-${node.type})`);
             gNode.appendChild(headerBanner);
 
-            // Node Type Text (crisp white in top header banner)
+            // Node Type Text (left/center header)
             const textType = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            textType.setAttribute("x", NODE_WIDTH / 2);
-            textType.setAttribute("y", 15);
-            textType.setAttribute("text-anchor", "middle");
+            textType.setAttribute("x", (node.line !== undefined && node.column !== undefined) ? 10 : NODE_WIDTH / 2);
+            textType.setAttribute("y", 14);
+            textType.setAttribute("text-anchor", (node.line !== undefined && node.column !== undefined) ? "start" : "middle");
             textType.setAttribute("fill", "#ffffff");
             textType.setAttribute("class", "node-text-type");
-            textType.setAttribute("font-size", "10.5");
+            textType.setAttribute("font-size", "9.5");
             textType.setAttribute("font-weight", "700");
             textType.setAttribute("letter-spacing", "0.06em");
-            textType.textContent = node.title.toUpperCase();
+            textType.textContent = (colors.label || node.title).toUpperCase();
             gNode.appendChild(textType);
 
-            // Node Value Text (centered in bottom body)
+            // Source Coordinate Badge (top right of banner)
+            if (node.line !== undefined && node.column !== undefined && node.type !== "Program") {
+                const textPos = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                textPos.setAttribute("x", NODE_WIDTH - 8);
+                textPos.setAttribute("y", 14);
+                textPos.setAttribute("text-anchor", "end");
+                textPos.setAttribute("fill", "rgba(255, 255, 255, 0.88)");
+                textPos.setAttribute("font-size", "8.5");
+                textPos.setAttribute("font-weight", "600");
+                textPos.setAttribute("font-family", "'Fira Code', Consolas, monospace");
+                textPos.textContent = `L${node.line}:C${node.column}`;
+                gNode.appendChild(textPos);
+            }
+
+            // Node Value Text (bottom body)
             const textVal = document.createElementNS("http://www.w3.org/2000/svg", "text");
             textVal.setAttribute("x", NODE_WIDTH / 2);
-            textVal.setAttribute("y", 41);
+            textVal.setAttribute("y", 39);
             textVal.setAttribute("text-anchor", "middle");
             textVal.setAttribute("fill", "#0f172a");
             textVal.setAttribute("class", "node-text-val");
-            textVal.setAttribute("font-size", "13.5");
+            textVal.setAttribute("font-size", "13");
             textVal.setAttribute("font-weight", "600");
             textVal.setAttribute("font-family", "'Fira Code', Consolas, monospace");
             const displayVal = node.val.length > 13 ? node.val.substring(0, 11) + "..." : node.val;
             textVal.textContent = displayVal;
             gNode.appendChild(textVal);
 
-            // Hover and Click events for node inspection
+            // Hover and Click events (Zero boundary oscillation)
             gNode.addEventListener("mouseenter", () => {
-                inspectorInfo.innerHTML = `<strong>${node.title}:</strong> ${node.details}`;
+                if (!selectedNode) {
+                    highlightBranch(node);
+                    updateInspector(node, false);
+                }
             });
+
+            gNode.addEventListener("mouseleave", () => {
+                if (!selectedNode) {
+                    clearHighlight();
+                    updateInspector(null);
+                }
+            });
+
             gNode.addEventListener("click", (e) => {
                 e.stopPropagation();
-                inspectorInfo.innerHTML = `<strong>${node.title}:</strong> ${node.details}`;
+                if (selectedNode === node) {
+                    // Toggle unpin
+                    deselectNode();
+                } else {
+                    if (selectedNode && selectedNode.domElement) {
+                        selectedNode.domElement.classList.remove("node-selected");
+                    }
+                    selectedNode = node;
+                    gNode.classList.add("node-selected");
+                    highlightBranch(node);
+                    updateInspector(node, true);
+                }
             });
 
             gMaster.appendChild(gNode);
@@ -434,10 +610,11 @@ const AstVisualizer = (() => {
     }
 
     function handleMouseDown(e) {
-        if (e.button !== 0) return; // Only left-click
+        if (e.button !== 0) return;
         isPanning = true;
         startPanX = e.clientX - translateX;
         startPanY = e.clientY - translateY;
+        if (containerElement) containerElement.style.cursor = "grabbing";
     }
 
     function handleMouseMove(e) {
@@ -449,6 +626,7 @@ const AstVisualizer = (() => {
 
     function handleMouseUp() {
         isPanning = false;
+        if (containerElement) containerElement.style.cursor = "grab";
     }
 
     function handleWheel(e) {
@@ -462,6 +640,9 @@ const AstVisualizer = (() => {
     return {
         init,
         render,
-        clear
+        clear,
+        zoom,
+        resetView,
+        deselectNode
     };
 })();

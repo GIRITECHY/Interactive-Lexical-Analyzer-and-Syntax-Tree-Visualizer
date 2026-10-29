@@ -3,7 +3,8 @@ app.py - Flask Web Application for LexiTree
 
 Provides local HTTP endpoints for:
 - GET /              : Serves the interactive user interface.
-- POST /api/analyze  : Analyzes submitted source code (lexical analysis + syntax parsing + AST generation).
+- POST /api/analyze  : Analyzes submitted source code (lexical analysis + syntax parsing +
+                       AST generation + Concrete Parse Tree generation + Three-Address Code generation).
 
 Constraints:
 - Binds strictly to 127.0.0.1:5000 (offline local use only).
@@ -16,6 +17,7 @@ import sys
 from flask import Flask, request, jsonify, render_template
 from lexer import Lexer
 from parser import Parser, ParserError
+from intermediate_code import TACGenerator
 
 app = Flask(__name__)
 
@@ -43,7 +45,9 @@ def analyze():
             "tokens": [ { "type": "...", "lexeme": "...", "line": 1, "column": 1, "value": ... }, ... ],
             "lexical_errors": [ { "message": "...", "line": 1, "column": 1, "suggestion": "..." }, ... ],
             "syntax_error": { "message": "...", "line": 1, "column": 1, "suggestion": "..." } or None,
-            "ast": { "type": "Program", "statements": [ ... ] } or None
+            "ast": { "type": "Program", "statements": [ ... ] } or None,
+            "parse_tree": { "symbol": "program", "label": "program", "kind": "nonterminal", "children": [ ... ] } or None,
+            "intermediate_code": [ "t1 = ...", ... ]
         }
     """
     if not request.is_json:
@@ -57,7 +61,9 @@ def analyze():
                 "column": 1,
                 "suggestion": "Send request as JSON containing a 'source_code' field."
             },
-            "ast": None
+            "ast": None,
+            "parse_tree": None,
+            "intermediate_code": []
         }), 400
 
     data = request.get_json(silent=True) or {}
@@ -74,7 +80,9 @@ def analyze():
                 "column": 1,
                 "suggestion": "Check request payload format."
             },
-            "ast": None
+            "ast": None,
+            "parse_tree": None,
+            "intermediate_code": []
         }), 400
 
     if len(source_code.encode("utf-8")) > MAX_SOURCE_SIZE:
@@ -88,7 +96,9 @@ def analyze():
                 "column": 1,
                 "suggestion": "Reduce source code size before analyzing."
             },
-            "ast": None
+            "ast": None,
+            "parse_tree": None,
+            "intermediate_code": []
         }), 400
 
     try:
@@ -105,19 +115,28 @@ def analyze():
                 "tokens": token_dicts,
                 "lexical_errors": lex_err_dicts,
                 "syntax_error": None,
-                "ast": None
+                "ast": None,
+                "parse_tree": None,
+                "intermediate_code": []
             })
 
-        # Phase 2: Syntax Analysis & AST Generation
+        # Phase 2: Syntax Analysis, AST Construction & Parse Tree Construction
         parser = Parser(tokens)
         ast = parser.parse()
+        parse_tree = parser.parse_tree
+
+        # Phase 3: Intermediate Code Generation (Three-Address Code)
+        tac_generator = TACGenerator()
+        intermediate_code = tac_generator.generate(ast)
 
         return jsonify({
             "success": True,
             "tokens": token_dicts,
             "lexical_errors": [],
             "syntax_error": None,
-            "ast": ast.to_dict()
+            "ast": ast.to_dict(),
+            "parse_tree": parse_tree.to_dict() if parse_tree else None,
+            "intermediate_code": intermediate_code
         })
 
     except ParserError as pe:
@@ -126,7 +145,9 @@ def analyze():
             "tokens": token_dicts,
             "lexical_errors": [],
             "syntax_error": pe.to_dict(),
-            "ast": None
+            "ast": None,
+            "parse_tree": None,
+            "intermediate_code": []
         })
 
     except Exception as ex:
@@ -141,7 +162,9 @@ def analyze():
                 "column": 1,
                 "suggestion": "Verify program syntax or re-try with valid expressions."
             },
-            "ast": None
+            "ast": None,
+            "parse_tree": None,
+            "intermediate_code": []
         }), 500
 
 
